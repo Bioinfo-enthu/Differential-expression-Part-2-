@@ -1,9 +1,9 @@
 #!/usr/bin/Rscript
-## Author: Taylor Falk
+## Author: jacinth 
 ## tfalk@bu.edu
 ## BU BF591
 ## Assignment Week 6
-
+install.packages("statmod")
 libs <- c("tidyverse", "ggVennDiagram", "BiocManager",
           "DESeq2", "edgeR", "limma")
 # if you don't have a package installed, use BiocManager::install() or 
@@ -33,7 +33,11 @@ for (package in libs) {
 #'
 #' @examples counts_df <- load_n_trim("/path/to/counts/verse_counts.tsv")
 load_n_trim <- function(filename) {
-    return(NULL)
+  select_cols <- c("gene", "vP0_1", "vP0_2", "vAd_1", "vAd_2")
+  counts_df <- read_tsv(filename, col_names = TRUE) %>%
+    dplyr::select(all_of(c("gene", select_cols))) %>%
+    column_to_rownames(var = "gene")
+  return(counts_df)
 }
 
 #' Perform a DESeq2 analysis of rna seq data
@@ -57,7 +61,16 @@ load_n_trim <- function(filename) {
 #'
 #' @examples run_deseq(counts_df, coldata, 10, "condition_day4_vs_day7")
 run_deseq <- function(count_dataframe, coldata, count_filter, condition_name) {
-    return(NULL)
+  coldata$condition <- factor(coldata$condition)
+  coldata$type <- factor(coldata$type)
+  dds <- DESeqDataSetFromMatrix(countData = count_dataframe,
+                                colData = coldata,
+                                design = ~ condition)
+  dds <- dds[rowSums(counts(dds)) >=count_filter, ]
+  dds <- DESeq(dds)
+  res <- results(dds, name=condition_name)
+  res <- results(dds)
+  return(res)
 }
 
 #### edgeR ####
@@ -77,7 +90,15 @@ run_deseq <- function(count_dataframe, coldata, count_filter, condition_name) {
 #'
 #' @examples run_edger(counts_df, group)
 run_edger <- function(count_dataframe, group) {
-    return(NULL)
+  dge <- DGEList(counts=count_dataframe,genes=rownames(count_dataframe))
+  design <- model.matrix(~group)
+  keep <- filterByExpr(dge, design)
+  dge <- dge[keep,,keep.lib.sizes=FALSE]
+  rownames(design) <- colnames(dge)
+  dge <- estimateDisp(dge, design, robust=TRUE)
+  fit <- glmFit(dge,design)
+  lrt <- glmLRT(fit)
+  return(as.data.frame(subset(lrt$table, select = -c(LR))))
 }
 
  #### limma ####
@@ -101,7 +122,14 @@ run_edger <- function(count_dataframe, group) {
 #' 
 #' @examples run_limma(counts_df, design, voom=TRUE)
 run_limma <- function(counts_dataframe, design, group) {
-    return(NULL)
+  dge <- DGEList(counts=counts_dataframe)
+  keep <- filterByExpr(dge, design)
+  dge <- dge[keep,,keep.lib.sizes=FALSE]
+  dge <- calcNormFactors(dge)
+  v <- voom(dge, design, plot=TRUE)
+  fit <- lmFit(v, design)
+  fit <- eBayes(fit)
+  return(as.data.frame(topTable(fit, coef=ncol(design),number=15026)))
 }
 
 #### ggplot ####
@@ -133,8 +161,20 @@ run_limma <- function(counts_dataframe, design, group) {
 #' 2 deseq   9.97e-261
 #' 3 deseq   1.16e-206
 combine_pval <- function(deseq, edger, limma) {
-    return(NULL)
-}
+    d <- data.frame(deseq[c("pvalue")])[1:1000,]
+    e <- edger$PValue[1:1000]
+    l <- limma$P.Value[1:1000]
+    d1 <- data.frame(d)
+    e1 <- data.frame(e)
+    l1 <- data.frame(l)
+    f <- merge(d1, e1, by.x = 0,by.y=0)
+    f1 <- merge(f,l1,by.x=0,by.y=0)[,3:5]
+    colnames(f1) <- c("DeSeq2","edgeR","Limma")
+    res <- tidyr::gather(f1)
+    colnames(res) <- c("package","pval")
+    return(res)
+  }
+  
 
 #' Create three separate facets for each of the diff. exp. pacakges.
 #'
@@ -157,7 +197,20 @@ combine_pval <- function(deseq, edger, limma) {
 #' 1  -9.84 2.23e-180 edgeR  
 #' 2   6.18 5.87e-179 edgeR  
 create_facets <- function(deseq, edger, limma) {
-    return(NULL)
+  d <- data.frame(deseq)[,c("log2FoldChange","padj")][1:1000,]
+  edger$padj <- stats::p.adjust(edger$PValue,method="BH")
+  e <- edger[,c("logFC","padj")][1:1000,]
+  names(limma)[5] <- "padj"
+  l <- limma[,c("logFC","padj")][1:1000,]
+  d1 <- data.frame(d)
+  names(d1)[1] <- "logFC"
+  d1["package"] <- "deseq"
+  e1 <- data.frame(e)
+  e1["package"] <- "edgeR"
+  l1 <- data.frame(l)
+  l1["package"] <- "limma"
+  f1 <- Reduce(function(x, y) merge(x, y, all=TRUE), list(d1,e1,l1))
+  return(f1)
 }
 
 #' Create an attractive volcano plot of three diff. exp. packages' data.
@@ -187,6 +240,20 @@ create_facets <- function(deseq, edger, limma) {
 #'
 #' @examples p <- theme_plot(volcano)
 theme_plot <- function(volcano_data) {
-    return(NULL)
+  custom_palette <- c("#1f77b4", "#ff7f0e", "#2ca02c")
+  p <- ggplot(volcano_data, aes(x = log2FoldChange, y = -log10(pvalue), color = factor(package))) +
+    geom_point(size = 2) + scale_color_manual(values = custom_palette) + labs(x = "Log2 Fold Change", y = "-log10(p-value)", color = "Package") +
+    facet_wrap(~package, scales = "free_y") +
+    theme_minimal() +
+    theme(
+      legend.position = "top",  # Change legend position if needed
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(size = 0.5),
+      axis.ticks = element_line(size = 0.5),
+      strip.background = element_rect(fill = "lightgrey"),
+      strip.text = element_text(size = 10, face = "bold")
+    )
+  return(p)
 }
 
