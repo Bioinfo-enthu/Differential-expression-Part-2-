@@ -53,6 +53,3 @@ This function prepares data for volcano plot visualization. It creates separate 
 
 Finally, the theme_plot() function creates customized plots using ggplot. It allows for experimentation with different colors, themes, and styles to make the plots visually appealing.
 
-## References
-
-- Reference papers and documentation for DESeq2, edgeR, and Limma packages.
